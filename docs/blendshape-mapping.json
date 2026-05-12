@@ -1,0 +1,28 @@
+{
+  "$schema": "markus/blendshape-mapping@1",
+  "description": "Layer B — Oculus viseme ID -> ordered list of candidate blendshape names on the rigged GLB. The runtime resolver picks the first candidate that exists in the model's morphTargetDictionary. Edit this file when the rigged GLB lands; no code changes needed.",
+  "instructions": [
+    "1. Run `npm run dump-blendshapes` in /frontend after the rigged GLB is in place.",
+    "2. For each of the 15 Oculus visemes, put the matching blendshape name(s) from the dump output at the FRONT of that viseme's candidate array.",
+    "3. Reload the app — `[visemes] resolved N/15` in the console should report 15/15.",
+    "4. Visit /?test=visemes to visually verify each shape."
+  ],
+  "oculusReference": "https://developer.oculus.com/documentation/unity/audio-ovrlipsync-viseme-reference/",
+  "visemes": {
+    "sil": ["viseme_sil", "sil", "neutral", "Neutral", "mouthClose"],
+    "PP":  ["viseme_PP",  "PP",  "M",  "mouthClose", "mouthPress"],
+    "FF":  ["viseme_FF",  "FF",  "F",  "mouthFunnel"],
+    "TH":  ["viseme_TH",  "TH",  "th", "tongueOut"],
+    "DD":  ["viseme_DD",  "DD",  "T",  "L",  "tongueUp"],
+    "kk":  ["viseme_kk",  "kk",  "K",  "K_G"],
+    "CH":  ["viseme_CH",  "CH",  "SH", "Ch_J_Sh"],
+    "SS":  ["viseme_SS",  "SS",  "S",  "mouthStretch"],
+    "nn":  ["viseme_nn",  "nn",  "N",  "NG"],
+    "RR":  ["viseme_RR",  "RR",  "R",  "Er"],
+    "aa":  ["viseme_aa",  "aa",  "AA", "A",  "jawOpen"],
+    "E":   ["viseme_E",   "E",   "EE", "Eh"],
+    "I":   ["viseme_I",   "I",   "IH", "Ih"],
+    "O":   ["viseme_O",   "O",   "OH", "Oh"],
+    "U":   ["viseme_U",   "U",   "UU", "OO", "Oo"]
+  }
+}

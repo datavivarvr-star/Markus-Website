@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(docker version --format '{{.Server.Version}}' 2>&1)",
+      "PowerShell($h = Invoke-RestMethod -Uri http://localhost:8001/health; $h | Format-List; Write-Output '---synthesize---'; $body = @{ text = \"Hello, my name is Markus.\" } | ConvertTo-Json; $resp = Invoke-RestMethod -Uri http://localhost:8001/synthesize -Method Post -Body $body -ContentType 'application/json'; $resp | Select-Object format, sample_rate, audio_ms, timing_source | Format-List; \"phoneme count: $\\($resp.phonemes.Count\\)\"; \"audio_b64 length \\(chars\\): $\\($resp.audio_b64.Length\\)\"; Write-Output '---first 10 phonemes---'; $resp.phonemes | Select-Object -First 10 | Format-Table)",
+      "PowerShell($body = @{ text = \"Hello.\" } | ConvertTo-Json; $raw = Invoke-WebRequest -Uri http://localhost:8001/synthesize -Method Post -Body $body -ContentType 'application/json' -UseBasicParsing; $json = $raw.Content; [Text.Encoding]::UTF8.GetString\\([Text.Encoding]::UTF8.GetBytes\\($json\\)\\) | ConvertFrom-Json | ForEach-Object { $_.phonemes } | Format-Table @{n='p_codepoints'; e={ \\($_.p.ToCharArray\\(\\) | ForEach-Object { 'U+{0:X4}' -f [int][char]$_ }\\) -join ',' }}, p, t0_ms, t1_ms -AutoSize)"
+    ]
+  }
+}

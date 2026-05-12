@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#0e1116" />
+    <title>Markus</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <main id="app">
+      <canvas id="stage"></canvas>
+
+      <div id="loader" class="loader" aria-live="polite">
+        <div class="loader-bar"><div class="loader-fill" id="loader-fill"></div></div>
+        <div class="loader-label" id="loader-label">Loading avatar…</div>
+      </div>
+
+      <section id="hud" class="hud" hidden>
+        <div id="transcript" class="transcript" aria-live="polite"></div>
+
+        <div id="status" class="status" hidden>
+          <span class="dot"></span><span id="status-text">Thinking…</span>
+        </div>
+
+        <form id="composer" class="composer" autocomplete="off">
+          <button
+            id="mic"
+            type="button"
+            class="mic"
+            aria-label="Talk to the avatar"
+            title="Hold or tap to talk"
+          >
+            <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
+              <path
+                fill="currentColor"
+                d="M12 14a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v5a3 3 0 0 0 3 3Zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2Z"
+              />
+            </svg>
+          </button>
+          <input
+            id="text-input"
+            class="text-input"
+            type="text"
+            inputmode="text"
+            placeholder="Type or tap the mic…"
+            maxlength="500"
+          />
+          <button id="send" type="submit" class="send" aria-label="Send">
+            <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+              <path fill="currentColor" d="M3 11l18-8-8 18-2-7-8-3Z" />
+            </svg>
+          </button>
+        </form>
+      </section>
+    </main>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

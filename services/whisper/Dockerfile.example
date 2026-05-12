@@ -1,0 +1,42 @@
+# === STUB — NOT DEPLOYED IN PHASE 8 ===
+#
+# This is a reserved slot for the future self-hosted STT upgrade. The current
+# stack uses the browser's Web Speech API (see frontend/src/stt.js). When we
+# outgrow that — accuracy, Firefox support, offline use — this directory
+# becomes a whisper.cpp HTTP server with the same contract the frontend
+# already expects, and only stt.js changes (it stops using the browser API
+# and starts POSTing audio chunks here).
+#
+# To activate this service, rename this file to `Dockerfile`, uncomment the
+# block below, drop a model file into ./models/, and add the service to
+# docker-compose.yml (Phase 9).
+#
+# Reference: https://github.com/ggerganov/whisper.cpp
+#
+# ---------------------------------------------------------------------------
+# FROM debian:bookworm-slim AS build
+#
+# RUN apt-get update && apt-get install -y --no-install-recommends \
+#     build-essential cmake git ca-certificates \
+#  && rm -rf /var/lib/apt/lists/*
+#
+# WORKDIR /src
+# RUN git clone --depth 1 https://github.com/ggerganov/whisper.cpp.git .
+# RUN cmake -B build -DWHISPER_BUILD_SERVER=ON \
+#  && cmake --build build --config Release -j
+#
+# FROM debian:bookworm-slim
+# RUN apt-get update && apt-get install -y --no-install-recommends \
+#     libgomp1 ca-certificates \
+#  && rm -rf /var/lib/apt/lists/*
+#
+# COPY --from=build /src/build/bin/whisper-server /usr/local/bin/whisper-server
+# COPY models/ /models/
+#
+# # Default to base.en — ~150 MB, real-time on CPU, English-only. For higher
+# # accuracy at higher CPU cost, swap to small.en or medium.en.
+# ENV WHISPER_MODEL=/models/ggml-base.en.bin
+# ENV WHISPER_PORT=8002
+#
+# EXPOSE 8002
+# CMD ["sh", "-c", "whisper-server --host 0.0.0.0 --port ${WHISPER_PORT} --model ${WHISPER_MODEL}"]

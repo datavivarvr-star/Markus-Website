@@ -1,0 +1,20 @@
+services:
+  piper-tts:
+    build: .
+    image: markus-piper-tts:0.1.0
+    container_name: markus-piper-tts
+    restart: unless-stopped
+    ports:
+      - "8001:8001"
+    environment:
+      VOICE_NAME: en_US-ryan-medium
+      ESPEAK_VOICE: en-us
+      LOG_LEVEL: info
+    volumes:
+      - ./voices:/voices:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; r=urllib.request.urlopen('http://127.0.0.1:8001/health',timeout=2); sys.exit(0 if r.status==200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s

@@ -1,0 +1,13 @@
+node_modules/
+dist/
+.env
+.env.local
+*.onnx
+*.onnx.json
+.DS_Store
+*.log
+logs/
+.vite/
+.cache/
+coverage/
+*.tmp
