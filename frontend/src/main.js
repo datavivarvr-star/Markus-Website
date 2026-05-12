@@ -36,6 +36,12 @@ async function bootstrap() {
   const canvas = document.getElementById('stage');
   const stage = createScene(canvas);
 
+  // Phase 10 — pre-warm Groq + Piper in parallel with the GLB download so
+  // the first user turn doesn't pay cold-start latency. Fire-and-forget;
+  // the endpoint returns immediately with current status and the actual
+  // warm-up runs in the background on the backend.
+  prewarmBackend();
+
   try {
     setLoaderProgress(0, 'Loading avatar…');
     const avatar = await loadAvatar(AVATAR_URL, {
@@ -61,24 +67,37 @@ async function bootstrap() {
         composerState.wsState === 'open' &&
         !composerState.llmInFlight &&
         !composerState.speaking;
+      // Phase 10 — the mic stays clickable while the assistant is speaking
+      // or thinking, so the user can barge-in. The text input stays gated.
+      const interruptible =
+        composerState.wsState === 'open' &&
+        (composerState.llmInFlight || composerState.speaking) &&
+        !composerState.listening;
       const placeholder = composerState.listening
         ? 'Listening…'
         : composerState.wsState !== 'open'
           ? 'Connecting…'
           : composerState.llmInFlight
-            ? 'Waiting for reply…'
+            ? 'Waiting for reply… (tap mic to interrupt)'
             : composerState.speaking
-              ? 'Avatar is speaking…'
+              ? 'Avatar is speaking… (tap mic to interrupt)'
               : 'Type or tap the mic…';
-      // While listening: text input + send disabled, but mic stays clickable as stop.
+      // While listening: text input + send disabled, mic stays clickable as stop.
       const inputEnabled = baseEnabled && !composerState.listening;
-      const micEnabled = composerState.listening || baseEnabled;
+      const micEnabled = composerState.listening || baseEnabled || interruptible;
+      const micMode = composerState.listening
+        ? undefined // aria-pressed already covers the listening visual.
+        : interruptible
+          ? 'interrupt'
+          : undefined;
       setComposerEnabled(inputEnabled, {
         placeholder,
         micOverride: micEnabled,
+        micMode,
       });
     }
 
+    let fallbackNoticed = false;
     const speech = createSpeechController({
       idle,
       visemeRig,
@@ -93,6 +112,16 @@ async function bootstrap() {
       },
       onError: (err) => {
         console.error('[speech] error:', err);
+      },
+      onFallback: () => {
+        // Phase 10 — Piper unreachable; we degraded to the browser's built-in
+        // SpeechSynthesisUtterance for this sentence. Surface once per page
+        // load so the user isn't peppered with the same notice every reply.
+        if (fallbackNoticed) return;
+        fallbackNoticed = true;
+        appendSystemLine(
+          "Voice synthesis is offline — using the browser's built-in voice (no lip-sync).",
+        );
       },
     });
 
@@ -158,10 +187,29 @@ async function bootstrap() {
       return sent;
     }
 
-    const stt = wireStt({ composerState, refreshComposer, speech, submitMessage });
-    wireComposer({ composerState, refreshComposer, speech, submitMessage, stt });
+    // Phase 10 — barge-in: stop the current spoken reply (audio + lipsync)
+    // and cancel the in-flight LLM stream so further sentences don't bleed
+    // through. Returns true if anything was actually cancelled.
+    function bargeIn() {
+      let didSomething = false;
+      if (composerState.speaking) {
+        speech.stop();
+        didSomething = true;
+      }
+      if (chat.cancelTurn()) {
+        composerState.llmInFlight = false;
+        setThinking(false);
+        endAssistantTurn();
+        didSomething = true;
+      }
+      if (didSomething) refreshComposer();
+      return didSomething;
+    }
 
-    window.__markus = { stage, avatar, idle, visemeRig, speech, chat, stt, sessionId };
+    const stt = wireStt({ composerState, refreshComposer, speech, submitMessage });
+    wireComposer({ composerState, refreshComposer, speech, submitMessage, stt, bargeIn });
+
+    window.__markus = { stage, avatar, idle, visemeRig, speech, chat, stt, sessionId, bargeIn };
 
     hideLoader();
     showHud();
@@ -182,7 +230,7 @@ async function bootstrap() {
   }
 }
 
-function wireComposer({ composerState, refreshComposer, speech, submitMessage, stt }) {
+function wireComposer({ composerState, refreshComposer, speech, submitMessage, stt, bargeIn }) {
   const { form, input, mic, send } = getComposerElements();
   if (!form) return;
 
@@ -202,7 +250,13 @@ function wireComposer({ composerState, refreshComposer, speech, submitMessage, s
     if (!stt) return;
     // Warm up audio playback inside the gesture even though STT doesn't need it.
     try { speech.warmup(); } catch (err) { console.warn('[main] speech.warmup failed:', err); }
+
+    // Phase 10 — barge-in: tapping the mic while the avatar is speaking or
+    // the LLM is still streaming aborts that turn before we start listening.
     if (stt.state === 'idle') {
+      if (composerState.speaking || composerState.llmInFlight) {
+        bargeIn?.();
+      }
       stt.start();
     } else {
       stt.stop();
@@ -300,6 +354,32 @@ function installDevControls({ speech }) {
   };
 
   console.info('[dev] dev panel enabled (?dev=1). Click "Test phrase" to test the TTS pipeline.');
+}
+
+function prewarmBackend() {
+  // Fire-and-forget. The endpoint returns immediately with the current
+  // warmup status; the actual warmup work runs in the background on the
+  // server. Safe to call multiple times — it's idempotent. A short timeout
+  // keeps a slow backend from leaving a hanging fetch in the page.
+  try {
+    const ac = new AbortController();
+    const t = setTimeout(() => ac.abort(), 5000);
+    fetch('/api/warmup', { method: 'GET', signal: ac.signal })
+      .then(async (res) => {
+        clearTimeout(t);
+        if (!res.ok) return;
+        const body = await res.json().catch(() => null);
+        if (body) console.info('[markus] warmup:', body);
+      })
+      .catch((err) => {
+        clearTimeout(t);
+        // Quietly ignore — the WS will still surface chat errors if Groq is
+        // actually broken. Warmup is a latency optimization, not a gate.
+        console.info('[markus] warmup ping failed (will retry on first turn):', err?.message ?? err);
+      });
+  } catch (err) {
+    console.info('[markus] warmup skipped:', err?.message ?? err);
+  }
 }
 
 bootstrap();

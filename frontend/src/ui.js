@@ -83,7 +83,7 @@ export function getComposerElements() {
   };
 }
 
-export function setComposerEnabled(enabled, { placeholder, micOverride } = {}) {
+export function setComposerEnabled(enabled, { placeholder, micOverride, micMode } = {}) {
   const { input, send, mic } = getComposerElements();
   if (input) {
     input.disabled = !enabled;
@@ -91,12 +91,23 @@ export function setComposerEnabled(enabled, { placeholder, micOverride } = {}) {
   }
   if (send) send.disabled = !enabled;
   if (mic) {
-    // micOverride lets STT keep the mic clickable (as a "stop listening"
-    // button) even when the rest of the composer is gated.
+    // micOverride lets the mic stay clickable while the rest of the composer
+    // is gated — used for STT "stop listening" and Phase 10 barge-in.
     const micEnabled = micOverride === undefined ? enabled : micOverride;
     mic.disabled = !micEnabled;
     if (!micEnabled) mic.setAttribute('aria-disabled', 'true');
     else mic.removeAttribute('aria-disabled');
+    // micMode lets the caller flag visual states like 'interrupt' (avatar
+    // is speaking, tap to interrupt). CSS picks this up via [data-mode].
+    if (micMode) mic.dataset.mode = micMode;
+    else delete mic.dataset.mode;
+    if (micMode === 'interrupt') {
+      mic.setAttribute('aria-label', 'Tap to interrupt');
+      mic.title = 'Tap to interrupt';
+    } else {
+      mic.setAttribute('aria-label', 'Microphone');
+      mic.title = '';
+    }
   }
 }
 

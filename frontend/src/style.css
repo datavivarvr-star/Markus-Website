@@ -200,6 +200,24 @@ body {
   color: #fff;
 }
 
+/* Phase 10 — barge-in affordance: mic stays clickable while the avatar is
+   speaking or thinking. The amber pulse signals "tap to interrupt". */
+.mic[data-mode="interrupt"] {
+  background: rgba(245, 158, 11, 0.18);
+  border-color: rgba(245, 158, 11, 0.55);
+  color: #fbbf24;
+  animation: mic-interrupt-pulse 1.4s ease-in-out infinite;
+}
+
+.mic[data-mode="interrupt"]:hover {
+  background: rgba(245, 158, 11, 0.28);
+}
+
+@keyframes mic-interrupt-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.0); }
+  50%      { box-shadow: 0 0 0 6px rgba(245, 158, 11, 0.18); }
+}
+
 .mic[disabled],
 .send[disabled] {
   opacity: 0.5;

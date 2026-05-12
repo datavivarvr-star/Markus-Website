@@ -1,0 +1,25 @@
+# Local-dev convenience overrides. Auto-loaded by `docker compose up`.
+#
+# - DOMAIN := ":80" so Caddy listens on plain HTTP and doesn't try to grab
+#   a TLS cert from Let's Encrypt (which would fail behind your laptop's
+#   NAT anyway).
+# - Backend + Piper ports exposed directly on the host for ad-hoc curl /
+#   Invoke-RestMethod testing.
+#
+# For a true production-shape run on your local box, skip this file:
+#   docker compose -f docker-compose.yml up -d --build
+
+services:
+  caddy:
+    environment:
+      DOMAIN: ":80"
+    ports:
+      - "8080:80"
+
+  backend:
+    ports:
+      - "3000:3000"
+
+  piper-tts:
+    ports:
+      - "8001:8001"

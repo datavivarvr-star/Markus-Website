@@ -1,0 +1,37 @@
+# Keep the build context small. Docker Compose uses the repo root as the
+# build context for the backend + frontend images.
+
+**/node_modules
+**/dist
+**/.vite
+**/.cache
+**/coverage
+.git
+.gitignore
+.github
+
+# Local env files — image must not bake in secrets.
+.env
+.env.local
+**/.env
+**/.env.local
+
+# Piper voices are bind-mounted at runtime; don't bloat the build context.
+services/piper-tts/voices
+
+# Misc
+*.log
+*.tmp
+**/.DS_Store
+**/Thumbs.db
+
+# Editor / IDE
+.vscode
+.idea
+
+# Markdown / docs not needed for the image (keep blendshape-mapping.json
+# which frontend imports — that lives under docs/ and is whitelisted by
+# being referenced explicitly in the frontend COPY).
+README.md
+DEPLOYMENT.md
+IMPLEMENTATION_PLAN.md

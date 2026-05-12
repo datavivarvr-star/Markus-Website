@@ -1,0 +1,59 @@
+# Markus avatar reverse-proxy + static host.
+#
+# DOMAIN is supplied by docker-compose:
+#   - Production: "markus.example.com"  → Caddy auto-provisions a Let's
+#     Encrypt cert and serves HTTPS on :443, redirecting :80.
+#   - Local dev:  ":80"                  → plain HTTP, no TLS. The override
+#     compose file sets this.
+#
+# Caddy v2's reverse_proxy handles WebSocket upgrades automatically — no
+# special directive is needed for /api/chat.
+
+{
+	# Uncomment and set LETSENCRYPT_EMAIL in .env to receive Let's Encrypt
+	# rate-limit + expiry notices on production deploys.
+	# email {$LETSENCRYPT_EMAIL}
+}
+
+{$DOMAIN} {
+	encode gzip zstd
+
+	# API: WebSocket + HTTP routes go to the Node backend.
+	handle /api/* {
+		reverse_proxy backend:3000
+	}
+
+	# Everything else: the bundled Vite SPA.
+	handle {
+		root * /usr/share/caddy
+		try_files {path} /index.html
+		file_server
+	}
+
+	# Modest caching for hashed Vite assets. The bundler emits content-hashed
+	# filenames under /assets/, so they are safe to cache aggressively. The
+	# avatar GLB is served from the same path but isn't hashed — keep a
+	# short TTL so a model swap propagates within an hour.
+	@hashedAssets {
+		path /assets/*.js /assets/*.css /assets/*.woff2
+	}
+	header @hashedAssets Cache-Control "public, max-age=31536000, immutable"
+
+	@avatar path /assets/*.glb
+	header @avatar Cache-Control "public, max-age=3600"
+
+	# Basic security headers. CSP intentionally permissive (data: for textures,
+	# blob: for AudioBuffer URLs); tighten further once the avatar pipeline
+	# is fully locked.
+	header {
+		Referrer-Policy "strict-origin-when-cross-origin"
+		X-Content-Type-Options "nosniff"
+		Permissions-Policy "microphone=(self)"
+		-Server
+	}
+
+	log {
+		output stdout
+		format console
+	}
+}

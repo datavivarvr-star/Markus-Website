@@ -1,0 +1,99 @@
+# Production reference stack.
+#
+# Bring up:    docker compose up -d --build
+# Tear down:   docker compose down
+# Logs:        docker compose logs -f
+#
+# This file is the production target. `docker-compose.override.yml` next to
+# it auto-loads for local dev (plain HTTP, exposed debug ports, DOMAIN=:80).
+# To run a true production build locally, skip the override:
+#   docker compose -f docker-compose.yml up -d --build
+
+services:
+  caddy:
+    build:
+      context: .
+      dockerfile: docker/frontend.Dockerfile
+    image: markus-frontend:0.1.0
+    container_name: markus-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      DOMAIN: ${DOMAIN:?DOMAIN must be set in .env (use ":80" for plain HTTP, or "your.domain.com" for auto-HTTPS)}
+      LETSENCRYPT_EMAIL: ${LETSENCRYPT_EMAIL:-}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  backend:
+    build:
+      context: .
+      dockerfile: docker/backend.Dockerfile
+    image: markus-backend:0.1.0
+    container_name: markus-backend
+    restart: unless-stopped
+    environment:
+      GROQ_API_KEY: ${GROQ_API_KEY:?GROQ_API_KEY must be set in .env}
+      GROQ_BASE_URL: ${GROQ_BASE_URL:-https://api.groq.com/openai/v1}
+      GROQ_MODEL: ${GROQ_MODEL:-openai/gpt-oss-20b}
+      PIPER_URL: ${PIPER_URL:-http://piper-tts:8001}
+      PORT: "3000"
+      HOST: "0.0.0.0"
+      ALLOWED_ORIGIN: ${ALLOWED_ORIGIN:-*}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      NODE_ENV: production
+    depends_on:
+      piper-tts:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "require('http').get('http://127.0.0.1:3000/api/health', r => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  piper-tts:
+    build: ./services/piper-tts
+    image: markus-piper-tts:0.1.0
+    container_name: markus-piper-tts
+    restart: unless-stopped
+    environment:
+      VOICE_NAME: ${PIPER_VOICE:-en_US-ryan-medium}
+      ESPEAK_VOICE: ${PIPER_ESPEAK_VOICE:-en-us}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    volumes:
+      # Bind-mount voices so swaps don't require a rebuild. The Piper
+      # Dockerfile also COPYs ./voices/ into the image as a fallback, but
+      # this mount masks it at runtime.
+      - ./services/piper-tts/voices:/voices:ro
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request,sys; r=urllib.request.urlopen('http://127.0.0.1:8001/health',timeout=2); sys.exit(0 if r.status==200 else 1)"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+volumes:
+  caddy-data:
+  caddy-config:

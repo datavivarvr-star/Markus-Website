@@ -1,9 +1,10 @@
 // Phase 7 — chat WebSocket client.
+// Phase 10 — adds cancelTurn() (barge-in) and handles {type:'cancelled'} ack.
 //
 // Connects to /api/chat (vite proxy → backend), sends {message, sessionId},
 // and dispatches sentence/done/error events to callbacks. Basic exponential
 // backoff reconnect so a backend restart during dev recovers without a page
-// reload. Phase 10 will harden this further (pre-warm ping, jittered backoff).
+// reload.
 
 const SESSION_STORAGE_KEY = 'markus.sessionId';
 const RECONNECT_DELAYS_MS = [500, 1000, 2000, 4000, 8000, 16000, 30000];
@@ -47,6 +48,10 @@ export function createChatClient({
   let reconnectTimer = null;
   let closedByUser = false;
   let inFlight = false;
+  // Phase 10 — barge-in: when the user interrupts, we send {type:'cancel'}
+  // and flip this flag so any in-transit sentence/done/error events from
+  // the aborted turn get dropped instead of bleeding into the next turn.
+  let cancelled = false;
 
   function setState(next) {
     if (state === next) return;
@@ -85,16 +90,24 @@ export function createChatClient({
       }
       switch (msg?.type) {
         case 'sentence':
+          if (cancelled) return;
           if (typeof msg.text === 'string' && msg.text.length > 0) {
             try { onSentence?.(msg.text); } catch (err) { console.error('[chat] onSentence threw', err); }
           }
           break;
         case 'done':
           inFlight = false;
+          if (cancelled) { cancelled = false; return; }
           try { onDone?.(); } catch (err) { console.error('[chat] onDone threw', err); }
+          break;
+        case 'cancelled':
+          // Server acknowledged a cancel; UI already cleaned up locally.
+          inFlight = false;
+          cancelled = false;
           break;
         case 'error':
           inFlight = false;
+          if (cancelled) { cancelled = false; return; }
           try { onError?.(msg.message || 'unknown_error'); } catch (err) { console.error('[chat] onError threw', err); }
           break;
         default:
@@ -146,6 +159,7 @@ export function createChatClient({
       return false;
     }
     inFlight = true;
+    cancelled = false;
     try {
       ws.send(JSON.stringify({ message: trimmed, sessionId }));
       return true;
@@ -155,6 +169,21 @@ export function createChatClient({
       try { onError?.('send_failed'); } catch {}
       return false;
     }
+  }
+
+  // Phase 10 — barge-in. Tells the backend to abort the in-flight stream
+  // and silently drops any sentence/done/error messages that arrive for the
+  // cancelled turn. Returns true if there was a turn to cancel.
+  function cancelTurn() {
+    if (!inFlight) return false;
+    cancelled = true;
+    inFlight = false;
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      try { ws.send(JSON.stringify({ type: 'cancel' })); } catch (err) {
+        console.warn('[chat] cancel send failed:', err);
+      }
+    }
+    return true;
   }
 
   function close() {
@@ -174,6 +203,7 @@ export function createChatClient({
 
   return {
     sendMessage,
+    cancelTurn,
     close,
     get state() { return state; },
     get inFlight() { return inFlight; },

@@ -16,6 +16,7 @@ export function createSpeechController({
   onSpeechStart,
   onSpeechEnd,
   onError,
+  onFallback,
 } = {}) {
   if (!idle || !visemeRig || !stage) {
     throw new Error('createSpeechController requires { idle, visemeRig, stage }');
@@ -48,6 +49,7 @@ export function createSpeechController({
       onSentenceStart: (payload) => lipsync.startSentence(payload),
       onSentenceEnd: () => lipsync.endSentence(),
       onError,
+      onFallback,
     });
 
     initialized = true;

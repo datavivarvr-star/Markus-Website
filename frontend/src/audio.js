@@ -1,10 +1,17 @@
 // Phase 6 — audio playback + TTS sentence queue.
+// Phase 10 — adds SpeechSynthesisUtterance fallback when /api/tts fails.
 //
 // Lazily creates a single AudioContext on first user gesture (iOS rule).
 // `createSpeaker` exposes speakSentence(text) which fetches /api/tts, decodes
 // the WAV, and plays sentences serially. Sentence N+1 starts fetching as soon
 // as it is enqueued, so by the time sentence N finishes playing, N+1 is
 // usually already decoded — hides backend latency.
+//
+// If /api/tts is unreachable (piper down, 5xx, timeout), we transparently
+// fall back to the browser's built-in `SpeechSynthesisUtterance`. The avatar
+// still talks — there are no phoneme timings so the mouth stays at rest,
+// which is documented in DEPLOYMENT.md §10 ("Avatar speaks but mouth doesn't
+// move").
 
 const TTS_ENDPOINT = '/api/tts';
 const TTS_TIMEOUT_MS = 15000;
@@ -75,6 +82,7 @@ export function createSpeaker({
   onSentenceStart,
   onSentenceEnd,
   onError,
+  onFallback,
 } = {}) {
   if (!audioCtx) throw new Error('createSpeaker requires an audioCtx');
 
@@ -83,16 +91,19 @@ export function createSpeaker({
   let isPlaying = false;
   let stopRequested = false;
   let currentSource = null;
+  let currentSynthUtterance = null;
 
   function speakSentence(text) {
     const trimmed = String(text || '').trim();
     if (!trimmed) return;
     const ac = new AbortController();
-    const fetchPromise = fetchTts(trimmed, ac.signal).catch((err) => {
-      console.error('[audio] tts fetch failed:', err);
-      onError?.(err);
-      return null;
-    });
+    const fetchPromise = fetchTts(trimmed, ac.signal)
+      .then((data) => ({ kind: 'piper', data }))
+      .catch((err) => {
+        console.warn('[audio] tts fetch failed; falling back to SpeechSynthesisUtterance:', err?.message ?? err);
+        try { onFallback?.(err); } catch {}
+        return { kind: 'fallback', text: trimmed };
+      });
     queue.push({ text: trimmed, fetchPromise, abort: () => ac.abort() });
     _drain();
   }
@@ -104,28 +115,35 @@ export function createSpeaker({
     onSpeechStart?.();
     while (queue.length > 0 && !stopRequested) {
       const item = queue.shift();
-      let data;
+      let result;
       try {
-        data = await item.fetchPromise;
+        result = await item.fetchPromise;
       } catch (err) {
+        // The fetch path is supposed to catch its own errors and resolve to
+        // a fallback descriptor; this is just defensive.
         console.error('[audio] await fetch failed:', err);
         continue;
       }
       if (stopRequested) break;
-      if (!data) continue;
+      if (!result) continue;
       try {
-        await _playOne(data);
+        if (result.kind === 'piper') {
+          await _playPiper(result.data);
+        } else if (result.kind === 'fallback') {
+          await _playFallback(result.text);
+        }
       } catch (err) {
         console.error('[audio] playback failed:', err);
         onError?.(err);
       }
     }
     currentSource = null;
+    currentSynthUtterance = null;
     isPlaying = false;
     onSpeechEnd?.();
   }
 
-  async function _playOne(data) {
+  async function _playPiper(data) {
     const arr = base64ToArrayBuffer(data.audio_b64);
     // decodeAudioData accepts a transferable ArrayBuffer; clone to avoid issues on Safari.
     const audioBuffer = await audioCtx.decodeAudioData(arr.slice(0));
@@ -158,6 +176,45 @@ export function createSpeaker({
     onSentenceEnd?.();
   }
 
+  // SpeechSynthesisUtterance fallback — fires when Piper is unreachable.
+  // No phoneme timings → lipsync stays at sil (mouth closed). We still emit
+  // sentence start/end so the rest of the pipeline (idle pause/resume,
+  // composer gating) stays consistent.
+  async function _playFallback(text) {
+    if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
+      console.warn('[audio] no speechSynthesis available — sentence dropped');
+      return;
+    }
+    // Defensive: a stale queued utterance from a previous turn would block us.
+    try { window.speechSynthesis.cancel(); } catch {}
+
+    onSentenceStart?.({
+      phonemes: [],
+      audioStartTime: audioCtx.currentTime,
+      durationMs: 0,
+      sampleRate: 0,
+      timingSource: 'speech-synthesis',
+    });
+
+    await new Promise((resolve) => {
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.rate = 1.0;
+      utterance.pitch = 1.0;
+      utterance.onend = () => resolve();
+      utterance.onerror = () => resolve();
+      currentSynthUtterance = utterance;
+      try {
+        window.speechSynthesis.speak(utterance);
+      } catch (err) {
+        console.warn('[audio] speechSynthesis.speak threw:', err);
+        resolve();
+      }
+    });
+
+    if (currentSynthUtterance) currentSynthUtterance = null;
+    onSentenceEnd?.();
+  }
+
   function stop() {
     stopRequested = true;
     for (const item of queue) {
@@ -165,11 +222,15 @@ export function createSpeaker({
     }
     queue.length = 0;
     if (currentSource) {
-      try {
-        currentSource.onended = null;
-        currentSource.stop();
-      } catch {}
+      // Don't null onended first — that orphans the resolve() in _playPiper
+      // and the drain loop hangs forever. Just stop(); onended fires and
+      // resolves the awaiting promise so _drain proceeds to its onSpeechEnd.
+      try { currentSource.stop(); } catch {}
       currentSource = null;
+    }
+    if (currentSynthUtterance) {
+      try { window.speechSynthesis.cancel(); } catch {}
+      currentSynthUtterance = null;
     }
   }
 

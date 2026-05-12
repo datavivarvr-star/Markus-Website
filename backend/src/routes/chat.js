@@ -15,6 +15,17 @@ function send(socket, obj) {
   }
 }
 
+function isAbortError(err) {
+  if (!err) return false;
+  const name = err.name || err.constructor?.name || '';
+  return (
+    name === 'AbortError' ||
+    name === 'APIUserAbortError' ||
+    err.code === 'ABORT_ERR' ||
+    err.message === 'aborted'
+  );
+}
+
 export async function chatRoute(app) {
   app.get('/api/chat', { websocket: true }, (socket, req) => {
     const connId = randomUUID();
@@ -22,18 +33,30 @@ export async function chatRoute(app) {
     log.info('chat.connect');
 
     let inFlight = false;
+    let currentAbort = null;
 
     socket.on('message', async (raw) => {
-      if (inFlight) {
-        send(socket, { type: 'error', message: 'busy' });
-        return;
-      }
-
       let payload;
       try {
         payload = JSON.parse(raw.toString());
       } catch {
         send(socket, { type: 'error', message: 'invalid_json' });
+        return;
+      }
+
+      // Phase 10 — barge-in: client tapped mic during streaming reply.
+      // Abort the Groq stream so it stops generating; the in-flight loop
+      // catches the abort, persists whatever was streamed, and emits
+      // {type:'cancelled'} for symmetry with done/error.
+      if (payload?.type === 'cancel') {
+        if (currentAbort) {
+          try { currentAbort.abort(); } catch {}
+        }
+        return;
+      }
+
+      if (inFlight) {
+        send(socket, { type: 'error', message: 'busy' });
         return;
       }
 
@@ -65,15 +88,20 @@ export async function chatRoute(app) {
       let firstTokenMs = null;
       let full = '';
       const buf = createSentenceBuffer((sentence) => send(socket, { type: 'sentence', text: sentence }));
+      const abort = new AbortController();
+      currentAbort = abort;
 
       try {
-        const stream = await groq.chat.completions.create({
-          model: config.groq.model,
-          messages,
-          stream: true,
-          temperature: config.groq.temperature,
-          max_tokens: config.groq.maxTokens,
-        });
+        const stream = await groq.chat.completions.create(
+          {
+            model: config.groq.model,
+            messages,
+            stream: true,
+            temperature: config.groq.temperature,
+            max_tokens: config.groq.maxTokens,
+          },
+          { signal: abort.signal },
+        );
 
         for await (const chunk of stream) {
           const delta = chunk.choices?.[0]?.delta?.content ?? '';
@@ -100,16 +128,42 @@ export async function chatRoute(app) {
           'chat.complete',
         );
       } catch (err) {
-        const status = err?.status ?? err?.response?.status;
-        log.error({ err: err?.message, status }, 'chat.error');
-        const code = status === 429 ? 'rate_limited' : status >= 500 ? 'llm_upstream_error' : 'llm_error';
-        send(socket, { type: 'error', message: code });
+        if (isAbortError(err) || abort.signal.aborted) {
+          // Persist whatever was actually streamed so session history stays
+          // consistent with what the user heard. buf.flush is unsafe after
+          // an abort (it might emit a half-finished sentence), so skip it.
+          if (full.trim()) {
+            appendTurn(sessionId, 'user', trimmed);
+            appendTurn(sessionId, 'assistant', full.trim());
+          }
+          send(socket, { type: 'cancelled' });
+          log.info(
+            {
+              sessionId,
+              ttft_ms: firstTokenMs != null ? Math.round(firstTokenMs) : null,
+              total_ms: Math.round(performance.now() - t0),
+              reply_chars: full.length,
+            },
+            'chat.cancelled',
+          );
+        } else {
+          const status = err?.status ?? err?.response?.status;
+          log.error({ err: err?.message, status }, 'chat.error');
+          const code = status === 429 ? 'rate_limited' : status >= 500 ? 'llm_upstream_error' : 'llm_error';
+          send(socket, { type: 'error', message: code });
+        }
       } finally {
         inFlight = false;
+        currentAbort = null;
       }
     });
 
-    socket.on('close', () => log.info('chat.disconnect'));
+    socket.on('close', () => {
+      if (currentAbort) {
+        try { currentAbort.abort(); } catch {}
+      }
+      log.info('chat.disconnect');
+    });
     socket.on('error', (err) => log.warn({ err: err?.message }, 'chat.socket_error'));
   });
 }
