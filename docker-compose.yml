@@ -37,6 +37,15 @@ services:
       timeout: 5s
       retries: 3
       start_period: 10s
+    # Phase 13 — bound disk usage from container stdout/stderr. The default
+    # json-file driver grows unbounded; in production this matters because
+    # backend pino logs are chatty. Three 10 MB files = ~30 MB ceiling per
+    # service. Adjust `max-size` / `max-file` if log volume grows.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   backend:
     build:
@@ -68,6 +77,11 @@ services:
       timeout: 5s
       retries: 3
       start_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   piper-tts:
     build: ./services/piper-tts
@@ -93,6 +107,11 @@ services:
       timeout: 5s
       retries: 3
       start_period: 15s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
 volumes:
   caddy-data:

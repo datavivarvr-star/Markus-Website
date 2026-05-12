@@ -23,4 +23,13 @@ export const config = {
     max: 60,
     timeWindow: '1 minute',
   },
+  // Phase 13 — per-session hourly cap. Catches a single client behind a
+  // shared NAT trying to burn the IP-level allowance from one tab.
+  sessionRateLimit: {
+    maxTurnsPerHour: 200,
+    windowMs: 60 * 60 * 1000,
+  },
+  // Phase 13 — WS frame cap. Real chat messages are ~600 B; this is plenty
+  // and shrinks the abuse surface vs the previous 64 KB default.
+  wsMaxPayloadBytes: 10 * 1024,
 };

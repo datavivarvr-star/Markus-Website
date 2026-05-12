@@ -219,6 +219,9 @@ export const CHAT_ERROR_MESSAGES = {
   invalid_message: 'Your message could not be sent.',
   llm_not_configured: 'The assistant is not configured yet. (Server is missing its API key.)',
   rate_limited: 'Rate limited — please slow down.',
+  // Phase 13 — per-session 200/hour cap. Separate from rate_limited so the
+  // user knows it's the session, not the IP.
+  session_rate_limited: "You've sent a lot of messages this hour. Take a short break and try again.",
   llm_upstream_error: "I'm having trouble reaching the assistant. Please try again.",
   llm_error: "Something went wrong on the assistant side. Please try again.",
   not_connected: 'Not connected to the server. Reconnecting…',

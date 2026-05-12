@@ -18,6 +18,17 @@ const app = Fastify({
   trustProxy: true,
 });
 
+// Phase 13 — defense-in-depth security headers at the backend layer. Caddy
+// also sets a few of these at the edge; double-setting is harmless (last
+// writer wins per Caddy's reverse_proxy + header directive). Keep this list
+// minimal — full CSP / HSTS belong at the edge where TLS lives.
+app.addHook('onSend', async (req, reply, payload) => {
+  reply.header('X-Frame-Options', 'DENY');
+  reply.header('X-Content-Type-Options', 'nosniff');
+  reply.header('Referrer-Policy', 'strict-origin-when-cross-origin');
+  return payload;
+});
+
 await app.register(cors, {
   origin: config.allowedOrigin === '*' ? true : config.allowedOrigin.split(',').map((s) => s.trim()),
   credentials: false,
@@ -29,7 +40,7 @@ await app.register(rateLimit, {
   allowList: (req) => req.url === '/api/health' || req.url === '/api/warmup',
 });
 
-await app.register(websocket, { options: { maxPayload: 64 * 1024 } });
+await app.register(websocket, { options: { maxPayload: config.wsMaxPayloadBytes } });
 
 await app.register(healthRoute);
 await app.register(chatRoute);

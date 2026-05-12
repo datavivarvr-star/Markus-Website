@@ -146,10 +146,20 @@ docker compose logs --tail=200 caddy   # last 200 lines
 ```
 
 - **Backend** emits structured JSON logs (pino). Each chat turn has a
-  `ttft_ms` and `total_ms` field — useful for latency tuning.
+  `ttft_ms` and `total_ms` field — useful for latency tuning. Phase 13 added
+  three security-relevant log lines: `chat.injection_blocked`,
+  `chat.session_rate_limited`, and `chat.llm_down_canned_reply`. Grep for
+  those if you need to audit user-side incidents.
 - **Caddy** logs to stdout in console format.
 - **Piper** uses Python `logging`; each `/synthesize` call logs `audio_ms`,
   `phonemes`, `took_ms`.
+
+All three services use the Docker `json-file` log driver capped at
+**3 × 10 MB per service** (configured in `docker-compose.yml` under each
+service's `logging:` block). Old segments are rotated and discarded
+automatically — no `logrotate` needed. If you need longer retention, point
+a log shipper (Loki / Vector / Fluent Bit) at the engine instead of
+raising the on-disk cap.
 
 ---
 
@@ -309,6 +319,10 @@ working through rollbacks without re-issuing certs.
 | `HOST` | no | `0.0.0.0` | Backend bind. |
 | `LOG_LEVEL` | no | `info` | `debug` / `info` / `warn` / `error`. |
 
+Phase 13 also fixes two transport limits in code (not env-tunable):
+- **WS frame cap: 10 KB.** Real chat messages are ~600 B; this caps the abuse surface. If a future feature legitimately needs larger inbound messages, raise `wsMaxPayloadBytes` in `backend/src/config.js`.
+- **Session rate limit: 200 turns / hour.** Per `sessionId`, sliding window. Layered on top of the IP-level 60/min limit so a single tab can't burn one IP's whole allowance.
+
 Missing required vars cause `docker compose up` to exit immediately with a
 readable error.
 
@@ -378,6 +392,26 @@ timing so the mouth stays at rest. The transcript shows a one-time
 notice ("Voice synthesis is offline…"). Check `docker compose ps`
 piper-tts health and `docker compose logs piper-tts` — once Piper is
 healthy, the next reply uses Piper again (no client reload required).
+
+**Avatar replies "I'm having a bit of trouble thinking right now…"
+repeatedly.** Phase 13's canned LLM-down reply (the backend speaks this
+through the normal TTS + lipsync path so the avatar doesn't go silent).
+Means Groq returned a 5xx or otherwise non-429 error. Grep
+`chat.llm_down_canned_reply` in backend logs for the exact upstream
+status. Common causes: expired `GROQ_API_KEY`, account suspension, or
+Groq incident — `status.groq.com`.
+
+**A user sees "You've sent a lot of messages this hour…".** Phase 13's
+per-session 200/hour cap kicked in. Grep `chat.session_rate_limited` in
+backend logs to confirm. Legitimate during stress tests; if it trips on
+real users frequently, raise `sessionRateLimit.maxTurnsPerHour` in
+`backend/src/config.js` after auditing why.
+
+**Mic button is hidden on a user's browser.** Either Firefox (no
+`SpeechRecognition` at all — text-only is the documented fallback) or
+the feature-detect failed for some other reason. Have the user try
+Chrome / Edge / Safari. The Whisper escape hatch at
+[services/whisper/](services/whisper/) is the long-term fix.
 
 ---
 

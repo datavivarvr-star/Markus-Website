@@ -245,9 +245,32 @@ body {
   border-color: var(--accent);
 }
 
+/* Phase 13 — privacy footer. Sits below the composer in the HUD column.
+   Pointer-events:none so it never blocks the canvas behind it. */
+.privacy {
+  align-self: center;
+  margin: 0;
+  max-width: min(640px, 92vw);
+  font-size: 10.5px;
+  line-height: 1.4;
+  color: var(--muted);
+  text-align: center;
+  opacity: 0.75;
+  pointer-events: none;
+}
+
 @media (max-width: 480px) {
   .transcript { font-size: 13px; }
   .text-input { font-size: 16px; }
+  .privacy { font-size: 10px; }
+}
+
+/* Phase 12 — respect the OS-level reduced-motion preference for in-DOM
+   animations (the 3D scene is handled in idle.js / scene.js). */
+@media (prefers-reduced-motion: reduce) {
+  .loader-fill { transition: none; }
+  .status .dot { animation: none; opacity: 0.7; }
+  .mic[data-mode="interrupt"] { animation: none; }
 }
 
 .dev-panel {

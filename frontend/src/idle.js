@@ -44,6 +44,21 @@ const SACCADE_RANGE_X = 0.06;
 const SACCADE_RANGE_Y = 0.08;
 const SACCADE_LERP = 8;
 
+// Phase 12 — when the OS asks for reduced motion (iOS Low Power, macOS
+// Reduce Motion, Windows "Show animations off"), scale down the twitchy
+// stuff. Blink + breathing remain at full amplitude — they're subtle.
+const REDUCED_MOTION_SWAY_SCALE = 0.4;
+const REDUCED_MOTION_SACCADE_SCALE = 0.0; // skip saccades entirely
+
+function prefersReducedMotion() {
+  if (typeof window === 'undefined' || !window.matchMedia) return false;
+  try {
+    return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  } catch {
+    return false;
+  }
+}
+
 function randBetween(lo, hi) {
   return lo + Math.random() * (hi - lo);
 }
@@ -81,6 +96,13 @@ export function createIdle(avatar) {
   const breatheMode = hasMorphBreathe ? 'morph' : chest ? 'chest' : 'off';
   const swayMode = head ? 'head' : 'off';
   const saccadeMode = leftEye || rightEye ? 'eye' : 'off';
+
+  const reduceMotion = prefersReducedMotion();
+  const swayAmpY = HEAD_SWAY_AMP_Y * (reduceMotion ? REDUCED_MOTION_SWAY_SCALE : 1);
+  const swayAmpX = HEAD_SWAY_AMP_X * (reduceMotion ? REDUCED_MOTION_SWAY_SCALE : 1);
+  const saccadeRangeX = SACCADE_RANGE_X * (reduceMotion ? REDUCED_MOTION_SACCADE_SCALE : 1);
+  const saccadeRangeY = SACCADE_RANGE_Y * (reduceMotion ? REDUCED_MOTION_SACCADE_SCALE : 1);
+  if (reduceMotion) console.info('[idle] prefers-reduced-motion: dampened sway, disabled saccades');
 
   const headRest = captureRotation(head);
   const leftEyeRest = captureRotation(leftEye);
@@ -144,8 +166,8 @@ export function createIdle(avatar) {
 
   function updateSway() {
     if (swayMode !== 'head' || !headRest) return;
-    head.rotation.y = headRest.y + Math.sin(t * 0.5) * HEAD_SWAY_AMP_Y;
-    head.rotation.x = headRest.x + Math.cos(t * 0.3) * HEAD_SWAY_AMP_X;
+    head.rotation.y = headRest.y + Math.sin(t * 0.5) * swayAmpY;
+    head.rotation.x = headRest.x + Math.cos(t * 0.3) * swayAmpX;
   }
 
   function updateBreathing() {
@@ -186,10 +208,11 @@ export function createIdle(avatar) {
 
   function updateSaccades(dt) {
     if (saccadeMode !== 'eye') return;
+    if (saccadeRangeX === 0 && saccadeRangeY === 0) return; // reduced-motion path
     nextSaccadeAt -= dt;
     if (nextSaccadeAt <= 0) {
-      saccadeTarget.x = (Math.random() - 0.5) * SACCADE_RANGE_X;
-      saccadeTarget.y = (Math.random() - 0.5) * SACCADE_RANGE_Y;
+      saccadeTarget.x = (Math.random() - 0.5) * saccadeRangeX;
+      saccadeTarget.y = (Math.random() - 0.5) * saccadeRangeY;
       nextSaccadeAt = randBetween(1, 2);
     }
     const k = Math.min(1, dt * SACCADE_LERP);

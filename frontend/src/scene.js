@@ -64,15 +64,38 @@ export function createScene(canvas) {
     return () => updaters.delete(fn);
   }
 
+  // Phase 12 — pause rendering while the tab is hidden so we don't burn
+  // mobile battery on an off-screen WebGL context. rAF is already throttled
+  // by the browser when hidden, but stopping the loop entirely saves the
+  // remaining GPU + idle-anim math too. On visibility restore we discard
+  // the accumulated delta so the avatar doesn't jump forward in one frame.
   const clock = new THREE.Clock();
-  function loop() {
+  let rafHandle = 0;
+  let running = false;
+  function tick() {
+    if (!running) { rafHandle = 0; return; }
     const dt = clock.getDelta();
     const t = clock.elapsedTime;
     for (const fn of updaters) fn(dt, t);
     renderer.render(scene, camera);
-    requestAnimationFrame(loop);
+    rafHandle = requestAnimationFrame(tick);
   }
-  requestAnimationFrame(loop);
+  function start() {
+    if (running) return;
+    running = true;
+    clock.getDelta(); // discard whatever sat in the clock while we were paused
+    rafHandle = requestAnimationFrame(tick);
+  }
+  function stop() {
+    running = false;
+    if (rafHandle) cancelAnimationFrame(rafHandle);
+    rafHandle = 0;
+  }
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) stop();
+    else start();
+  });
+  start();
 
-  return { renderer, scene, camera, onUpdate, frameToObject, resize };
+  return { renderer, scene, camera, onUpdate, frameToObject, resize, start, stop };
 }

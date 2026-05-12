@@ -1,5 +1,15 @@
 # Implementation Plan — Self-Hosted Real-Time 3D Avatar Chatbot
 
+> **Build status (2026-05-12):** Phases 0–10, 12, 13 complete. Phase 11
+> (latency tuning) **deferred** — local end-to-end latency is well within
+> the p50 ≤ 1.2 s / p95 ≤ 2.0 s target; revisit if Phase 14 user-testing
+> surfaces "feels slow" complaints. Phase 14 (user testing + soft launch)
+> is the active phase; primarily user-side work. See
+> [README.md](README.md) for a one-pager and
+> [DEPLOYMENT.md](DEPLOYMENT.md) for ops. The phase descriptions below
+> are kept verbatim as the historical reference, including Phase 11's
+> tuning playbook for when it's needed.
+
 **Goal:** A low-latency talking 3D human avatar on a website. User speaks → avatar replies with lip-synced speech.
 
 **Locked stack:**

@@ -1,8 +1,14 @@
 import { randomUUID } from 'node:crypto';
 import { groq, SYSTEM_PROMPT } from '../groq.js';
 import { config } from '../config.js';
-import { appendTurn, getSession } from '../sessions.js';
+import { appendTurn, getSession, checkSessionRate, recordTurn } from '../sessions.js';
 import { createSentenceBuffer } from '../utils/sentence-buffer.js';
+import {
+  sanitizeUserMessage,
+  isLikelyPromptInjection,
+  INJECTION_DEFLECTION,
+  LLM_DOWN_REPLY,
+} from '../utils/safety.js';
 
 const MAX_MESSAGE_CHARS = 2000;
 
@@ -13,6 +19,14 @@ function send(socket, obj) {
   } catch {
     // swallow — client likely disconnected
   }
+}
+
+// Phase 13 — emit a canned reply through the normal sentence/done pipeline
+// so it gets TTS + lipsync like any other turn. Used for prompt-injection
+// deflection and the LLM-down fallback.
+function sendCannedReply(socket, text) {
+  send(socket, { type: 'sentence', text });
+  send(socket, { type: 'done' });
 }
 
 function isAbortError(err) {
@@ -65,9 +79,20 @@ export async function chatRoute(app) {
         send(socket, { type: 'error', message: 'missing_fields' });
         return;
       }
-      const trimmed = message.trim();
-      if (!trimmed || trimmed.length > MAX_MESSAGE_CHARS) {
+      // Phase 13 — strip control chars before length/empty checks so a
+      // hostile client can't smuggle past validation with NULs.
+      const sanitized = sanitizeUserMessage(message);
+      if (!sanitized || sanitized.length > MAX_MESSAGE_CHARS) {
         send(socket, { type: 'error', message: 'invalid_message' });
+        return;
+      }
+
+      // Phase 13 — per-session hourly rate limit. Layered on top of the
+      // IP-level limit so one tab can't burn the whole NAT allowance.
+      const rate = checkSessionRate(sessionId);
+      if (!rate.allowed) {
+        log.warn({ sessionId, retryAfterMs: rate.retryAfterMs }, 'chat.session_rate_limited');
+        send(socket, { type: 'error', message: 'session_rate_limited' });
         return;
       }
 
@@ -76,12 +101,24 @@ export async function chatRoute(app) {
         return;
       }
 
+      // Phase 13 — naive prompt-injection guard. Catches the most obvious
+      // "ignore previous instructions" variants and short-circuits with a
+      // canned deflection that flows through TTS like a normal turn.
+      if (isLikelyPromptInjection(sanitized)) {
+        log.info({ sessionId, len: sanitized.length }, 'chat.injection_blocked');
+        recordTurn(sessionId);
+        appendTurn(sessionId, 'user', sanitized);
+        appendTurn(sessionId, 'assistant', INJECTION_DEFLECTION);
+        sendCannedReply(socket, INJECTION_DEFLECTION);
+        return;
+      }
+
       inFlight = true;
       const session = getSession(sessionId);
       const messages = [
         { role: 'system', content: SYSTEM_PROMPT },
         ...session.messages,
-        { role: 'user', content: trimmed },
+        { role: 'user', content: sanitized },
       ];
 
       const t0 = performance.now();
@@ -113,7 +150,8 @@ export async function chatRoute(app) {
         buf.flush();
 
         if (full.trim()) {
-          appendTurn(sessionId, 'user', trimmed);
+          recordTurn(sessionId);
+          appendTurn(sessionId, 'user', sanitized);
           appendTurn(sessionId, 'assistant', full.trim());
         }
 
@@ -133,7 +171,8 @@ export async function chatRoute(app) {
           // consistent with what the user heard. buf.flush is unsafe after
           // an abort (it might emit a half-finished sentence), so skip it.
           if (full.trim()) {
-            appendTurn(sessionId, 'user', trimmed);
+            recordTurn(sessionId);
+            appendTurn(sessionId, 'user', sanitized);
             appendTurn(sessionId, 'assistant', full.trim());
           }
           send(socket, { type: 'cancelled' });
@@ -149,8 +188,17 @@ export async function chatRoute(app) {
         } else {
           const status = err?.status ?? err?.response?.status;
           log.error({ err: err?.message, status }, 'chat.error');
-          const code = status === 429 ? 'rate_limited' : status >= 500 ? 'llm_upstream_error' : 'llm_error';
-          send(socket, { type: 'error', message: code });
+          if (status === 429) {
+            send(socket, { type: 'error', message: 'rate_limited' });
+          } else {
+            // Phase 13 — LLM unavailable: speak a canned reply instead of
+            // going silent. Don't persist this fake reply in session
+            // history; the next real turn should see the user's question
+            // unanswered. The frontend treats this as a normal turn so
+            // the avatar's mouth actually moves (TTS + lipsync run).
+            log.warn({ sessionId }, 'chat.llm_down_canned_reply');
+            sendCannedReply(socket, LLM_DOWN_REPLY);
+          }
         }
       } finally {
         inFlight = false;

@@ -84,6 +84,16 @@ export function createStt({
 
     rec.onerror = (event) => {
       const code = event?.error || 'unknown';
+      // Always log the raw event for diagnostics — the user-facing message
+      // collapses several codes into the same text, so console is the only
+      // place the actual failure code lives.
+      if (code !== 'aborted') {
+        console.warn(
+          '[stt] error: code=%s message=%s (browser-side; see Web Speech API spec for codes)',
+          code,
+          event?.message ?? '',
+        );
+      }
       // `aborted` happens on stop() — not an error from the user's perspective.
       // `no-speech` is the silent-timeout case; surface separately so callers
       // can choose to ignore it.
@@ -159,7 +169,11 @@ export const STT_ERROR_MESSAGES = {
   'not-allowed': 'Microphone access was blocked. Allow microphone permission to talk to the avatar.',
   'service-not-allowed': 'Microphone access was blocked by the browser or system.',
   'audio-capture': 'No microphone detected. Plug one in and try again.',
-  'network': 'Speech recognition needs an internet connection.',
+  // The Web Speech API routes audio to a vendor cloud (Google for Chrome,
+  // Microsoft for Edge, Apple for Safari). `network` means that cloud is
+  // unreachable — typical on Brave / Arc / ungoogled Chromium variants
+  // that strip the Google API key. The user's actual internet is fine.
+  'network': "Your browser's speech recognition is unavailable. Try Chrome, Edge, or Safari — or use the text box.",
   'language-not-supported': 'This browser does not support English speech recognition.',
   'no-speech': "I didn't catch that. Tap the mic and try again.",
   'start_failed': 'Could not start the microphone. Try again.',
