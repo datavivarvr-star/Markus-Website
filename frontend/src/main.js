@@ -29,7 +29,7 @@ import {
   hideInterim,
 } from './ui.js';
 
-const AVATAR_URL = '/assets/Markus_Basic.glb';
+const AVATAR_URL = '/assets/Markus_final.glb';
 const TEST_PHRASE = 'Hello, my name is Markus. How can I help you today?';
 
 async function bootstrap() {

@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { existsSync } from 'node:fs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const DEFAULT_GLB = resolve(__dirname, '../../assets/Markus_Basic.glb');
+const DEFAULT_GLB = resolve(__dirname, '../../assets/Markus_final.glb');
 
 const glbPath = process.argv[2] ? resolve(process.argv[2]) : DEFAULT_GLB;
 

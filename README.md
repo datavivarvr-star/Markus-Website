@@ -19,12 +19,12 @@ on the user's side (recruit testers, observe, send issues back).
 - **LLM** — Groq cloud API (`openai/gpt-oss-20b`) via the OpenAI SDK
 - **TTS** — Self-hosted Piper (`/services/piper-tts`) with phoneme timing → visemes
 - **STT** — Web Speech API (Chrome / Edge / Safari) + text fallback; self-hosted Whisper reserved at `/services/whisper/`
-- **Avatar** — `assets/Markus_Basic.glb` (currently a mock; rigged GLB will drop in per DEPLOYMENT.md §7.4)
+- **Avatar** — `assets/Markus_final.glb` (rigged GLB with 15 Oculus visemes + eyeBlinkLeft/Right + humanoid skeleton; swap workflow in DEPLOYMENT.md §7.4)
 
 ## Layout
 
 ```
-/assets            Markus_Basic.glb (avatar)
+/assets            Markus_final.glb (avatar)
 /backend           Fastify + WS + Groq + Piper proxy + warmup + safety guards
 /frontend          Vite + Three.js app (scene, idle, visemes, audio, lipsync, chat WS, STT)
 /services

@@ -18,7 +18,7 @@
 - LLM: **Groq cloud API** (OpenAI-compatible) — model `openai/gpt-oss-20b`, free tier, very low latency
 - TTS: **Piper TTS** (self-hosted, ONNX, runs fast on CPU — no paid TTS API)
 - Visemes: **espeak-ng phoneme timing** → Oculus viseme set → custom blendshape names
-- Avatar: `/assets/Markus_Basic.glb` (custom Blender GLB with custom blendshape names)
+- Avatar: `/assets/Markus_final.glb` (rigged Blender GLB; Oculus viseme blendshapes + `eyeBlinkLeft`/`eyeBlinkRight` + standard humanoid skeleton)
 - Backend: Node.js + Fastify + WebSocket
 - Deployment: you handle manually (Docker Compose stack provided as reference)
 - Reverse proxy + HTTPS: your call — Compose includes Caddy as a default option
@@ -436,7 +436,7 @@ Flag any of these for promotion into the main phases if user-testing in Phase 14
 
 | Decision | Value |
 |---|---|
-| Avatar GLB | `assets/Markus_Basic.glb` ✅ already in place |
+| Avatar GLB | `assets/Markus_final.glb` ✅ rigged model in place (visemes + bones) |
 | LLM provider | Groq cloud (`https://api.groq.com/openai/v1`) |
 | LLM model | `openai/gpt-oss-20b` ✅ access confirmed |
 | Groq API key | Use the existing dev key for now; user will rotate at production |

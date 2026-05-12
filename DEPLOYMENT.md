@@ -196,18 +196,25 @@ filenames automatically.
 docker compose -f docker-compose.yml up -d --build backend
 ```
 
-### 7.4 Swap in a new avatar GLB (when the modeller delivers the rigged model)
+### 7.4 Swap in a new avatar GLB
 
-The current `assets/Markus_Basic.glb` is a placeholder mock with no
-blendshapes. When the 3D modeller delivers the real rigged GLB with the
-15 Oculus visemes + `eyeBlinkLeft` / `eyeBlinkRight`, follow this exact
-flow:
+The live avatar is `assets/Markus_final.glb` — the rigged model delivered
+by the 3D modeller, with the 15 Oculus visemes + `eyeBlinkLeft` /
+`eyeBlinkRight` morph targets and a standard humanoid skeleton (Head,
+spine2, arms, legs). Two morphs in this export use a double-underscore
+prefix (`viseme__I`, `viseme__O`) and are mapped in
+`docs/blendshape-mapping.json`.
 
-1. **Drop the new file** at the same path: `assets/Markus_Basic.glb`
-   (overwrite, don't rename — code references this exact path).
+If the modeller delivers a new revision, follow this exact flow:
+
+1. **Drop the new file** at `assets/Markus_final.glb` (overwrite — code
+   references this exact path via `frontend/src/main.js` and
+   `frontend/scripts/dump-blendshapes.js`). If you want to ship under a
+   different filename, update those two references too.
 2. The frontend dev / Claude runs `npm run dump-blendshapes` in `frontend/`
-   to enumerate the morph target names, then fills in the real names in
-   `docs/blendshape-mapping.json`.
+   to enumerate the morph target names, then reconciles them against
+   `docs/blendshape-mapping.json` — adding any new spellings to the
+   candidate arrays for the affected visemes.
 3. The frontend dev opens `http(s)://<domain>/?test=visemes` and visually
    verifies each of the 15 visemes; any that look wrong get fixed in the
    mapping JSON.
@@ -374,10 +381,13 @@ rebuild and redeploy of all containers, not just the ones with new images.
 hash, or temporarily lower the cache header in `Caddyfile` and reload
 Caddy.
 
-**Avatar speaks but mouth doesn't move.** The current GLB is a mock with
-no blendshapes — this is expected until the rigged GLB swap happens
-(§7.4). Check the browser console for `[visemes] missing morphs for N
-viseme(s)` warnings.
+**Avatar speaks but mouth doesn't move.** The runtime resolver couldn't
+match the rigged GLB's morph target names to the Oculus visemes. Check
+the browser console for `[visemes] resolved N/15` — anything under 15/15
+means specific visemes failed to bind. Run `npm run dump-blendshapes` in
+`frontend/` to inspect the actual morph names and add the missing
+spellings to `docs/blendshape-mapping.json` (§7.4 step 2). Reload after
+rebuilding the caddy image.
 
 **Avatar replies but no audio on iPhone Safari.** Confirm the user tapped
 a UI element (mic or send) before the first reply — iOS requires a user

@@ -21,8 +21,8 @@
     "RR":  ["viseme_RR",  "RR",  "R",  "Er"],
     "aa":  ["viseme_aa",  "aa",  "AA", "A",  "jawOpen"],
     "E":   ["viseme_E",   "E",   "EE", "Eh"],
-    "I":   ["viseme_I",   "I",   "IH", "Ih"],
-    "O":   ["viseme_O",   "O",   "OH", "Oh"],
+    "I":   ["viseme__I", "viseme_I",   "I",   "IH", "Ih"],
+    "O":   ["viseme__O", "viseme_O",   "O",   "OH", "Oh"],
     "U":   ["viseme_U",   "U",   "UU", "OO", "Oo"]
   }
 }

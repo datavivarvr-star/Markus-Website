@@ -26,7 +26,7 @@ npm run dump-blendshapes
 
 Optional: pass a different GLB path: `npm run dump-blendshapes -- ../assets/Other.glb`.
 
-The current mock GLB has no morph targets — the script reports this and the runtime logs a warning. Lipsync / blink stay dormant until a rigged GLB is dropped in.
+The live rigged GLB (`assets/Markus_final.glb`) ships 17 morph targets — 15 Oculus visemes plus `eyeBlinkLeft` / `eyeBlinkRight`. Two are exported with a double-underscore prefix (`viseme__I`, `viseme__O`) and are handled by `docs/blendshape-mapping.json`. Re-run the dumper after any modeller revision and update the mapping JSON if any names drift.
 
 ## File layout
 
