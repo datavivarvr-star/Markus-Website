@@ -1,6 +1,4 @@
-# Backend: Node + Fastify. Multi-arch-friendly, runs as non-root.
-# Build context: repo root.
-
+# Build context: ./backend
 FROM node:20-alpine
 
 ENV NODE_ENV=production \
@@ -9,11 +7,10 @@ ENV NODE_ENV=production \
 
 WORKDIR /app
 
-# Install prod dependencies first so the layer caches across source-only edits.
-COPY backend/package.json backend/package-lock.json* ./
+COPY package.json package-lock.json* ./
 RUN npm ci --omit=dev && npm cache clean --force
 
-COPY backend/src ./src
+COPY src ./src
 
 USER node
 

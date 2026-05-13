@@ -13,7 +13,7 @@ services:
   caddy:
     build:
       context: .
-      dockerfile: docker/frontend.Dockerfile
+      dockerfile: frontend/Dockerfile
     image: markus-frontend:0.1.0
     container_name: markus-caddy
     restart: unless-stopped
@@ -49,8 +49,8 @@ services:
 
   backend:
     build:
-      context: .
-      dockerfile: docker/backend.Dockerfile
+      context: ./backend
+      dockerfile: Dockerfile
     image: markus-backend:0.1.0
     container_name: markus-backend
     restart: unless-stopped
