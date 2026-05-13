@@ -229,12 +229,14 @@ export function createIdle(avatar) {
     }
   }
 
+  // Ensure chest is locked at rest scale and never touched again.
+  resetBreathing();
+
   function update(dt) {
     t += dt;
     updateBlink(dt);
     if (paused) return;
     updateSway();
-    updateBreathing();
     updateSaccades(dt);
   }
 
@@ -242,7 +244,6 @@ export function createIdle(avatar) {
     if (paused) return;
     paused = true;
     resetSway();
-    resetBreathing();
   }
 
   function resume() {
