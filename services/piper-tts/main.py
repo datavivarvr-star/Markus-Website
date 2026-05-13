@@ -3,6 +3,7 @@ import io
 import logging
 import os
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -12,6 +13,10 @@ from typing import List, Optional
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
+
+# Windows → use piper.exe subprocess (no Python wheel available).
+# Linux/Docker → use piper-tts Python package (has manylinux wheels for 3.11).
+_IS_WIN = sys.platform == "win32"
 
 PIPER_EXE = Path(os.environ.get(
     "PIPER_EXE",
@@ -31,38 +36,36 @@ logging.basicConfig(
 )
 log = logging.getLogger("piper-tts")
 
-app = FastAPI(title="piper-tts", version="0.3.0")
+app = FastAPI(title="piper-tts", version="0.4.0")
 
 _sample_rate: Optional[int] = None
 _voice_ready = False
 
-# Serialise all piper.exe calls — each process loads the 60 MB ONNX model,
-# so running them concurrently saturates CPU/RAM and causes timeouts.
-# Sentences are short enough that sequential synthesis is fast (<400 ms each).
+# Serialise Windows piper.exe calls — each subprocess loads the 60 MB ONNX
+# model so concurrent calls saturate CPU/RAM. On Linux the model is loaded
+# once into _piper_voice; the lock is only used there for lazy init.
 _piper_lock = threading.Lock()
 
-# Pre-loaded gruut module reference so the first real request doesn't pay
-# the cold-import cost (~1 s on first call).
-_gruut = None
+_gruut = None          # gruut module, pre-loaded at startup
+_piper_voice = None    # Linux: PiperVoice instance (lazy, cached)
 
 
 def _check_voice() -> None:
     global _voice_ready
     onnx = VOICE_DIR / f"{VOICE_NAME}.onnx"
-    cfg = VOICE_DIR / f"{VOICE_NAME}.onnx.json"
+    cfg  = VOICE_DIR / f"{VOICE_NAME}.onnx.json"
     if not onnx.exists() or not cfg.exists():
         log.error("voice files missing: %s", onnx)
         return
-    if not PIPER_EXE.exists():
+    if _IS_WIN and not PIPER_EXE.exists():
         log.error("piper.exe not found at: %s", PIPER_EXE)
         return
     _voice_ready = True
-    log.info("voice ready: %s (piper.exe: %s)", VOICE_NAME, PIPER_EXE)
+    backend = f"piper.exe ({PIPER_EXE})" if _IS_WIN else "piper-tts Python package"
+    log.info("voice ready: %s  backend: %s", VOICE_NAME, backend)
 
 
 def _warmup() -> None:
-    """Run once at startup: pre-load gruut and do a silent piper.exe test
-    so the first real user request is served from warm state."""
     global _gruut
     try:
         import gruut as _g
@@ -75,9 +78,9 @@ def _warmup() -> None:
     if _voice_ready:
         try:
             _synthesize_audio("Hello.")
-            log.info("piper.exe warmup synthesis complete")
+            log.info("warmup synthesis complete")
         except Exception as exc:
-            log.warning("piper.exe warmup failed: %s", exc)
+            log.warning("warmup synthesis failed: %s", exc)
 
 
 _check_voice()
@@ -105,15 +108,20 @@ class SynthesizeResponse(BaseModel):
 
 @app.get("/health")
 def health():
-    return {
+    info: dict = {
         "ok": _voice_ready,
         "voice": VOICE_NAME,
         "voice_loaded": _voice_ready,
         "sample_rate": _sample_rate,
-        "piper_exe": str(PIPER_EXE),
-        "piper_exe_exists": PIPER_EXE.exists(),
+        "platform": sys.platform,
         "gruut_loaded": _gruut is not None,
     }
+    if _IS_WIN:
+        info["piper_exe"] = str(PIPER_EXE)
+        info["piper_exe_exists"] = PIPER_EXE.exists()
+    else:
+        info["piper_voice_loaded"] = _piper_voice is not None
+    return info
 
 
 @app.post("/synthesize", response_model=SynthesizeResponse)
@@ -147,14 +155,20 @@ def synthesize(req: SynthesizeRequest):
 
 
 def _synthesize_audio(text: str) -> tuple[bytes, int]:
+    if _IS_WIN:
+        return _synthesize_win32(text)
+    return _synthesize_linux(text)
+
+
+def _synthesize_win32(text: str) -> tuple[bytes, int]:
+    """Windows local dev: call piper.exe via subprocess."""
     global _sample_rate
     onnx = VOICE_DIR / f"{VOICE_NAME}.onnx"
-    cfg = VOICE_DIR / f"{VOICE_NAME}.onnx.json"
+    cfg  = VOICE_DIR / f"{VOICE_NAME}.onnx.json"
 
     with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
         tmp = f.name
 
-    proc = None
     try:
         with _piper_lock:
             proc = subprocess.Popen(
@@ -172,7 +186,10 @@ def _synthesize_audio(text: str) -> tuple[bytes, int]:
                 raise RuntimeError("piper.exe timed out after 20 s")
 
         if proc.returncode != 0:
-            raise RuntimeError(f"piper.exe failed (exit {proc.returncode}): {stderr[:300].decode(errors='replace')}")
+            raise RuntimeError(
+                f"piper.exe failed (exit {proc.returncode}): "
+                f"{stderr[:300].decode(errors='replace')}"
+            )
 
         with open(tmp, "rb") as f:
             wav_bytes = f.read()
@@ -181,6 +198,34 @@ def _synthesize_audio(text: str) -> tuple[bytes, int]:
             os.unlink(tmp)
         except OSError:
             pass
+
+    with wave.open(io.BytesIO(wav_bytes), "rb") as wf:
+        sr = wf.getframerate()
+
+    _sample_rate = sr
+    return wav_bytes, sr
+
+
+def _synthesize_linux(text: str) -> tuple[bytes, int]:
+    """Linux / Docker: use piper-tts Python package (manylinux wheel)."""
+    global _sample_rate, _piper_voice
+
+    # Lazy init — double-checked locking so concurrent calls don't double-load.
+    if _piper_voice is None:
+        with _piper_lock:
+            if _piper_voice is None:
+                from piper import PiperVoice  # type: ignore[import]
+                onnx = VOICE_DIR / f"{VOICE_NAME}.onnx"
+                cfg  = VOICE_DIR / f"{VOICE_NAME}.onnx.json"
+                _piper_voice = PiperVoice.load(
+                    str(onnx), config_path=str(cfg), use_cuda=False
+                )
+                log.info("PiperVoice loaded: %s", VOICE_NAME)
+
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as wf:
+        _piper_voice.synthesize(text, wf)
+    wav_bytes = buf.getvalue()
 
     with wave.open(io.BytesIO(wav_bytes), "rb") as wf:
         sr = wf.getframerate()
@@ -222,10 +267,10 @@ def _gruut_phonemes(text: str) -> List[str]:
         return []
 
 
-_VOWEL_CHARS = set("aeiouɑɒæɛɪɔʊʌəɚɝœøyʏɵɜɐ")
-_STOP_CHARS = set("pbtdkgʔɖɟʈc")
+_VOWEL_CHARS     = set("aeiouɑɒæɛɪɔʊʌəɚɝœøyʏɵɜɐ")
+_STOP_CHARS      = set("pbtdkgʔɖɟʈc")
 _FRICATIVE_CHARS = set("fvszʃʒθðxɣçhɦ")
-_NASAL_CHARS = set("mnŋɲɳ")
+_NASAL_CHARS     = set("mnŋɲɳ")
 
 
 def _weight(p: str) -> float:
@@ -234,12 +279,9 @@ def _weight(p: str) -> float:
     if any(ch in _VOWEL_CHARS for ch in p):
         return 2.0
     head = p[0]
-    if head in _STOP_CHARS:
-        return 0.5
-    if head in _FRICATIVE_CHARS:
-        return 1.3
-    if head in _NASAL_CHARS:
-        return 1.0
+    if head in _STOP_CHARS:      return 0.5
+    if head in _FRICATIVE_CHARS: return 1.3
+    if head in _NASAL_CHARS:     return 1.0
     return 1.0
 
 
