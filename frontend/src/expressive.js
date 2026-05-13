@@ -1,4 +1,4 @@
-const EYEBROW_MAX = 0.3;
+const EYEBROW_MAX = 1.0;
 const ADAMS_MAX = 0.4;
 
 function findMorph(morphMeshes, name) {
