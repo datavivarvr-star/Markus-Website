@@ -12,6 +12,7 @@ import { createLipsync } from './lipsync.js';
 export function createSpeechController({
   idle,
   visemeRig,
+  expressiveRig,
   stage,
   onSpeechStart,
   onSpeechEnd,
@@ -31,8 +32,8 @@ export function createSpeechController({
   function init() {
     if (initialized) return;
     audioCtx = ensureAudioContext();
-    lipsync = createLipsync({ audioCtx, visemeRig });
-    unsubscribeLipsync = stage.onUpdate(() => lipsync.update());
+    lipsync = createLipsync({ audioCtx, visemeRig, expressiveRig });
+    unsubscribeLipsync = stage.onUpdate((dt) => lipsync.update(dt));
 
     speaker = createSpeaker({
       audioCtx,

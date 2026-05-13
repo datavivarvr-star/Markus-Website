@@ -1,7 +1,9 @@
+import * as THREE from 'three';
 import { createScene } from './scene.js';
 import { loadAvatar } from './avatar.js';
 import { createIdle } from './idle.js';
 import { createVisemeRig } from './visemes.js';
+import { createExpressiveRig } from './expressive.js';
 import { runVisemeDiagnostic } from './viseme-diagnostic.js';
 import { createSpeechController } from './speech.js';
 import {
@@ -29,7 +31,7 @@ import {
   hideInterim,
 } from './ui.js';
 
-const AVATAR_URL = '/assets/Markus_final.glb';
+const AVATAR_URL = '/assets/Markustalking.glb';
 const TEST_PHRASE = 'Hello, my name is Markus. How can I help you today?';
 
 async function bootstrap() {
@@ -55,6 +57,7 @@ async function bootstrap() {
     stage.onUpdate((dt) => idle.update(dt));
 
     const visemeRig = createVisemeRig(avatar.morphMeshes);
+    const expressiveRig = createExpressiveRig(avatar.morphMeshes);
 
     const composerState = {
       llmInFlight: false,
@@ -101,6 +104,7 @@ async function bootstrap() {
     const speech = createSpeechController({
       idle,
       visemeRig,
+      expressiveRig,
       stage,
       onSpeechStart: () => {
         composerState.speaking = true;
@@ -208,6 +212,7 @@ async function bootstrap() {
 
     const stt = wireStt({ composerState, refreshComposer, speech, submitMessage });
     wireComposer({ composerState, refreshComposer, speech, submitMessage, stt, bargeIn });
+    wireAvatarClick({ canvas, stage, avatar, speech, composerState });
 
     window.__markus = { stage, avatar, idle, visemeRig, speech, chat, stt, sessionId, bargeIn };
 
@@ -354,6 +359,35 @@ function installDevControls({ speech }) {
   };
 
   console.info('[dev] dev panel enabled (?dev=1). Click "Test phrase" to test the TTS pipeline.');
+}
+
+function wireAvatarClick({ canvas, stage, avatar, speech, composerState }) {
+  const raycaster = new THREE.Raycaster();
+  const pointer = new THREE.Vector2();
+
+  const GREETINGS = [
+    "Hey! You can ask me anything — just type or tap the mic.",
+    "Hi there! I'm Markus. What can I help you with?",
+    "Hello! Go ahead, type a question or use the mic below.",
+    "You clicked me! I'm Markus — ask me anything.",
+    "Hey there! Happy to help. What's on your mind?",
+  ];
+
+  canvas.addEventListener('click', (e) => {
+    if (composerState.speaking || composerState.llmInFlight) return;
+
+    const rect = canvas.getBoundingClientRect();
+    pointer.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+    pointer.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+
+    raycaster.setFromCamera(pointer, stage.camera);
+    const hits = raycaster.intersectObject(avatar.root, true);
+    if (hits.length === 0) return;
+
+    try { speech.warmup(); } catch { /* ignore */ }
+    const phrase = GREETINGS[Math.floor(Math.random() * GREETINGS.length)];
+    speech.speakSentence(phrase);
+  });
 }
 
 function prewarmBackend() {

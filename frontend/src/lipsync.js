@@ -45,7 +45,7 @@ export function buildVisemeQueue(phonemes, durationMs) {
   return out;
 }
 
-export function createLipsync({ audioCtx, visemeRig }) {
+export function createLipsync({ audioCtx, visemeRig, expressiveRig }) {
   if (!audioCtx) throw new Error('createLipsync requires an audioCtx');
   if (!visemeRig) throw new Error('createLipsync requires a visemeRig');
 
@@ -61,6 +61,7 @@ export function createLipsync({ audioCtx, visemeRig }) {
     durationMs = Math.max(0, Number(dMs) || 0);
     cachedIdx = 0;
     active = true;
+    expressiveRig?.start();
   }
 
   function endSentence() {
@@ -75,13 +76,20 @@ export function createLipsync({ audioCtx, visemeRig }) {
   function reset() {
     active = false;
     queue = null;
+    expressiveRig?.reset();
     visemeRig.clear();
   }
 
-  function update() {
-    if (!active || !queue || queue.length === 0) return;
+  function update(dt = 0) {
+    if (!active || !queue || queue.length === 0) {
+      expressiveRig?.update(0, dt);
+      return;
+    }
     const audioTimeMs = (audioCtx.currentTime - startAt) * 1000;
-    if (audioTimeMs < 0) return;
+    if (audioTimeMs < 0) {
+      expressiveRig?.update(0, dt);
+      return;
+    }
 
     // Advance the monotonic cursor while the next entry has already started.
     while (
@@ -98,6 +106,7 @@ export function createLipsync({ audioCtx, visemeRig }) {
     const local = audioTimeMs - cur.t;
     const blend = Math.min(1, Math.max(0, local / segDur));
 
+    expressiveRig?.update(audioTimeMs, dt);
     visemeRig.applyViseme(cur.id, next?.id ?? 'sil', blend);
   }
 
