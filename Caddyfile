@@ -42,13 +42,23 @@
 	@avatar path /assets/*.glb
 	header @avatar Cache-Control "public, max-age=3600"
 
-	# Basic security headers. CSP intentionally permissive (data: for textures,
-	# blob: for AudioBuffer URLs); tighten further once the avatar pipeline
-	# is fully locked.
+	# Security headers.
+	# HSTS: only sent when TLS is active (DOMAIN != ":80"). Caddy skips this
+	# header on plain-HTTP responses, so local dev is unaffected.
 	header {
-		Referrer-Policy "strict-origin-when-cross-origin"
-		X-Content-Type-Options "nosniff"
-		Permissions-Policy "microphone=(self)"
+		Referrer-Policy                    "strict-origin-when-cross-origin"
+		X-Content-Type-Options             "nosniff"
+		X-Frame-Options                    "DENY"
+		Permissions-Policy                 "microphone=(self)"
+		Strict-Transport-Security          "max-age=31536000; includeSubDomains"
+		# CSP allows:
+		#   self          — page, scripts, styles from same origin
+		#   blob:         — AudioContext BufferSource URLs created at runtime
+		#   data:         — inline textures used by Three.js material loader
+		#   wss:          — WebSocket connection to /api/chat
+		#   api.groq.com  — LLM calls go backend→Groq, NOT from the browser,
+		#                   so this is intentionally absent here
+		Content-Security-Policy            "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self' wss:; worker-src blob:; font-src 'self' data:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
 		-Server
 	}
 
