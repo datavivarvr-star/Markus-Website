@@ -22,7 +22,7 @@ export async function ttsRoute(app) {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ text: req.body.text }),
-          signal: AbortSignal.timeout(15000),
+          signal: AbortSignal.timeout(45000),
         });
 
         if (!res.ok) {

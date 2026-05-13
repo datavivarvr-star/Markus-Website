@@ -1,11 +1,11 @@
 :root {
-  --bg: #0e1116;
-  --fg: #e7eaf0;
-  --muted: #8a93a3;
+  --bg: #d8dee8;
+  --fg: #1a1d2e;
+  --muted: #5a6170;
   --accent: #4f8cff;
   --accent-fg: #ffffff;
-  --surface: rgba(20, 24, 32, 0.72);
-  --surface-border: rgba(255, 255, 255, 0.08);
+  --surface: rgba(255, 255, 255, 0.62);
+  --surface-border: rgba(0, 0, 0, 0.08);
   --danger: #ef4444;
 }
 
@@ -18,7 +18,9 @@ body {
   margin: 0;
   padding: 0;
   height: 100%;
-  background: var(--bg);
+  background-color: var(--bg);
+  background-image: linear-gradient(135deg, rgb(190, 238, 245) 0%, rgb(238, 220, 246) 100%);
+  background-attachment: fixed;
   color: var(--fg);
   font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   overscroll-behavior: none;
@@ -39,6 +41,7 @@ body {
   height: 100%;
   display: block;
   background: transparent;
+  z-index: 1;
 }
 
 .loader {
@@ -49,11 +52,12 @@ body {
   width: min(280px, 70vw);
   text-align: center;
   pointer-events: none;
+  z-index: 2;
 }
 
 .loader-bar {
   height: 4px;
-  background: rgba(255, 255, 255, 0.08);
+  background: rgba(0, 0, 0, 0.08);
   border-radius: 999px;
   overflow: hidden;
 }
@@ -82,6 +86,7 @@ body {
   flex-direction: column;
   gap: 10px;
   pointer-events: none;
+  z-index: 2;
 }
 
 .transcript {
@@ -118,7 +123,7 @@ body {
 }
 
 .transcript .line.system {
-  color: #f97373;
+  color: #dc2626;
   font-style: italic;
   font-size: 12px;
 }

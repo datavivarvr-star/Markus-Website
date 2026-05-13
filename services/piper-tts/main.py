@@ -3,6 +3,8 @@ import io
 import logging
 import os
 import subprocess
+import tempfile
+import threading
 import time
 import wave
 from pathlib import Path
@@ -11,11 +13,15 @@ from typing import List, Optional
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
-from piper import PiperVoice
-
-VOICE_DIR = Path(os.environ.get("VOICE_DIR", "/voices"))
+PIPER_EXE = Path(os.environ.get(
+    "PIPER_EXE",
+    str(Path(__file__).parent / "bin" / "piper" / "piper.exe"),
+))
+VOICE_DIR = Path(os.environ.get(
+    "VOICE_DIR",
+    str(Path(__file__).parent / "voices"),
+))
 VOICE_NAME = os.environ.get("VOICE_NAME", "en_US-ryan-medium")
-ESPEAK_VOICE = os.environ.get("ESPEAK_VOICE", "en-us")
 LOG_LEVEL = os.environ.get("LOG_LEVEL", "info").upper()
 MAX_CHARS = int(os.environ.get("MAX_CHARS", "2000"))
 
@@ -25,31 +31,57 @@ logging.basicConfig(
 )
 log = logging.getLogger("piper-tts")
 
-app = FastAPI(title="piper-tts", version="0.1.0")
+app = FastAPI(title="piper-tts", version="0.3.0")
 
-_voice: Optional[PiperVoice] = None
 _sample_rate: Optional[int] = None
+_voice_ready = False
+
+# Serialise all piper.exe calls — each process loads the 60 MB ONNX model,
+# so running them concurrently saturates CPU/RAM and causes timeouts.
+# Sentences are short enough that sequential synthesis is fast (<400 ms each).
+_piper_lock = threading.Lock()
+
+# Pre-loaded gruut module reference so the first real request doesn't pay
+# the cold-import cost (~1 s on first call).
+_gruut = None
 
 
-def _load_voice() -> None:
-    global _voice, _sample_rate
-    onnx_path = VOICE_DIR / f"{VOICE_NAME}.onnx"
-    config_path = VOICE_DIR / f"{VOICE_NAME}.onnx.json"
-
-    if not onnx_path.exists() or not config_path.exists():
-        log.error(
-            "voice files missing: onnx=%s exists=%s, config=%s exists=%s",
-            onnx_path, onnx_path.exists(), config_path, config_path.exists(),
-        )
+def _check_voice() -> None:
+    global _voice_ready
+    onnx = VOICE_DIR / f"{VOICE_NAME}.onnx"
+    cfg = VOICE_DIR / f"{VOICE_NAME}.onnx.json"
+    if not onnx.exists() or not cfg.exists():
+        log.error("voice files missing: %s", onnx)
         return
+    if not PIPER_EXE.exists():
+        log.error("piper.exe not found at: %s", PIPER_EXE)
+        return
+    _voice_ready = True
+    log.info("voice ready: %s (piper.exe: %s)", VOICE_NAME, PIPER_EXE)
 
-    log.info("loading voice: %s", onnx_path)
-    _voice = PiperVoice.load(str(onnx_path), config_path=str(config_path))
-    _sample_rate = getattr(_voice.config, "sample_rate", None) or _voice.config.audio.sample_rate
-    log.info("voice loaded: %s sample_rate=%s", VOICE_NAME, _sample_rate)
+
+def _warmup() -> None:
+    """Run once at startup: pre-load gruut and do a silent piper.exe test
+    so the first real user request is served from warm state."""
+    global _gruut
+    try:
+        import gruut as _g
+        _gruut = _g
+        list(_gruut.sentences("Hello.", lang="en-us"))
+        log.info("gruut pre-loaded")
+    except Exception as exc:
+        log.warning("gruut pre-load failed: %s", exc)
+
+    if _voice_ready:
+        try:
+            _synthesize_audio("Hello.")
+            log.info("piper.exe warmup synthesis complete")
+        except Exception as exc:
+            log.warning("piper.exe warmup failed: %s", exc)
 
 
-_load_voice()
+_check_voice()
+threading.Thread(target=_warmup, daemon=True, name="warmup").start()
 
 
 class SynthesizeRequest(BaseModel):
@@ -74,17 +106,19 @@ class SynthesizeResponse(BaseModel):
 @app.get("/health")
 def health():
     return {
-        "ok": _voice is not None,
+        "ok": _voice_ready,
         "voice": VOICE_NAME,
-        "voice_loaded": _voice is not None,
+        "voice_loaded": _voice_ready,
         "sample_rate": _sample_rate,
-        "espeak_voice": ESPEAK_VOICE,
+        "piper_exe": str(PIPER_EXE),
+        "piper_exe_exists": PIPER_EXE.exists(),
+        "gruut_loaded": _gruut is not None,
     }
 
 
 @app.post("/synthesize", response_model=SynthesizeResponse)
 def synthesize(req: SynthesizeRequest):
-    if _voice is None:
+    if not _voice_ready:
         raise HTTPException(503, "voice_not_loaded")
 
     text = req.text.strip()
@@ -94,7 +128,6 @@ def synthesize(req: SynthesizeRequest):
     t0 = time.time()
     wav_bytes, sample_rate = _synthesize_audio(text)
     audio_ms = _wav_duration_ms(wav_bytes)
-
     phonemes, timing_source = _phonemes_with_timing(text, audio_ms)
 
     elapsed_ms = int((time.time() - t0) * 1000)
@@ -114,59 +147,79 @@ def synthesize(req: SynthesizeRequest):
 
 
 def _synthesize_audio(text: str) -> tuple[bytes, int]:
-    buf = io.BytesIO()
-    with wave.open(buf, "wb") as wf:
-        _voice.synthesize(text, wf)
-    data = buf.getvalue()
-    with wave.open(io.BytesIO(data), "rb") as wf:
+    global _sample_rate
+    onnx = VOICE_DIR / f"{VOICE_NAME}.onnx"
+    cfg = VOICE_DIR / f"{VOICE_NAME}.onnx.json"
+
+    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
+        tmp = f.name
+
+    proc = None
+    try:
+        with _piper_lock:
+            proc = subprocess.Popen(
+                [str(PIPER_EXE), "--model", str(onnx), "--config", str(cfg), "--output_file", tmp],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                cwd=str(PIPER_EXE.parent),
+            )
+            try:
+                _, stderr = proc.communicate(input=text.encode(), timeout=20)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.communicate()
+                raise RuntimeError("piper.exe timed out after 20 s")
+
+        if proc.returncode != 0:
+            raise RuntimeError(f"piper.exe failed (exit {proc.returncode}): {stderr[:300].decode(errors='replace')}")
+
+        with open(tmp, "rb") as f:
+            wav_bytes = f.read()
+    finally:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+
+    with wave.open(io.BytesIO(wav_bytes), "rb") as wf:
         sr = wf.getframerate()
-    return data, sr
+
+    _sample_rate = sr
+    return wav_bytes, sr
 
 
 def _wav_duration_ms(wav_bytes: bytes) -> int:
     with wave.open(io.BytesIO(wav_bytes), "rb") as wf:
-        frames = wf.getnframes()
-        sr = wf.getframerate()
-        return int(frames * 1000 / sr)
+        return int(wf.getnframes() * 1000 / wf.getframerate())
 
 
 def _phonemes_with_timing(text: str, audio_ms: int) -> tuple[list[dict], str]:
-    phonemes = _espeak_phonemes(text)
+    phonemes = _gruut_phonemes(text)
     if not phonemes:
         return [], "none"
-    return _distribute_durations(phonemes, audio_ms), "espeak_proportional"
+    return _distribute_durations(phonemes, audio_ms), "gruut_proportional"
 
 
-def _espeak_phonemes(text: str) -> List[str]:
+def _gruut_phonemes(text: str) -> List[str]:
+    global _gruut
     try:
-        result = subprocess.run(
-            ["espeak-ng", "-v", ESPEAK_VOICE, "-q", "--sep=_", "--ipa", "--", text],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-    except FileNotFoundError:
-        log.warning("espeak-ng not installed; phoneme timing disabled")
+        if _gruut is None:
+            import gruut as _g
+            _gruut = _g
+        tokens: List[str] = []
+        for sentence in _gruut.sentences(text, lang="en-us"):
+            for word in sentence:
+                if not word.phonemes:
+                    continue
+                tokens.extend(word.phonemes)
+                tokens.append("_")
+        if tokens and tokens[-1] == "_":
+            tokens.pop()
+        return tokens
+    except Exception as exc:
+        log.warning("gruut phonemization failed: %s", exc)
         return []
-    except subprocess.TimeoutExpired:
-        log.warning("espeak-ng timed out for text len=%d", len(text))
-        return []
-
-    if result.returncode != 0:
-        log.warning("espeak-ng exit=%d stderr=%s", result.returncode, result.stderr[:200])
-        return []
-
-    raw = result.stdout.strip()
-    tokens: List[str] = []
-    words = raw.split()
-    for i, word in enumerate(words):
-        if i > 0:
-            tokens.append("_")
-        for p in word.split("_"):
-            p = p.strip()
-            if p:
-                tokens.append(p)
-    return tokens
 
 
 _VOWEL_CHARS = set("aeiouɑɒæɛɪɔʊʌəɚɝœøyʏɵɜɐ")
@@ -193,23 +246,14 @@ def _weight(p: str) -> float:
 def _distribute_durations(phonemes: List[str], total_ms: int) -> list[dict]:
     if not phonemes or total_ms <= 0:
         return []
-
     weights = [_weight(p) for p in phonemes]
     total_w = sum(weights) or 1.0
-
     out: list[dict] = []
     cursor = 0.0
     for p, w in zip(phonemes, weights):
         dur = total_ms * (w / total_w)
-        t0 = cursor
-        t1 = cursor + dur
-        out.append({
-            "p": p,
-            "t0_ms": int(round(t0)),
-            "t1_ms": int(round(t1)),
-        })
-        cursor = t1
-
+        out.append({"p": p, "t0_ms": int(round(cursor)), "t1_ms": int(round(cursor + dur))})
+        cursor += dur
     if out:
         out[-1]["t1_ms"] = total_ms
     return out

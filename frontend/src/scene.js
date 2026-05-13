@@ -9,7 +9,7 @@ export function createScene(canvas) {
   });
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.0;
+  renderer.toneMappingExposure = 1.2;
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
   renderer.setClearColor(0x000000, 0);
 
@@ -19,19 +19,23 @@ export function createScene(canvas) {
   camera.position.set(0, 1.55, 0.9);
   camera.lookAt(0, 1.55, 0);
 
-  const ambient = new THREE.AmbientLight(0xffffff, 0.55);
+  // Soft bright ambient base
+  const ambient = new THREE.AmbientLight(0xeefaff, 1.45);
   scene.add(ambient);
 
-  const key = new THREE.DirectionalLight(0xffffff, 1.2);
-  key.position.set(-1.2, 2.2, 1.6);
+  // Main key light — face / body (≈ X:45° Y:25°)
+  const key = new THREE.DirectionalLight(0xffffff, 1.35);
+  key.position.set(3, 5, 4);
   scene.add(key);
 
-  const fill = new THREE.DirectionalLight(0xc8d4ff, 0.35);
-  fill.position.set(1.5, 1.0, 0.8);
+  // Fill — cool blue-white, softens shadows (≈ X:20° Y:-40°)
+  const fill = new THREE.DirectionalLight(0xdcebff, 0.55);
+  fill.position.set(-4, 2, 3);
   scene.add(fill);
 
-  const rim = new THREE.DirectionalLight(0xffe0b2, 0.25);
-  rim.position.set(0, 2, -2);
+  // Rim — slight separation from background
+  const rim = new THREE.DirectionalLight(0xffffff, 0.18);
+  rim.position.set(0, 3, -4);
   scene.add(rim);
 
   function resize() {

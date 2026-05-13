@@ -6,6 +6,8 @@ export const VISEME_IDS = Object.freeze([
 
 const STRIP_MARKS = /[ˈˌːˑ‿̩̯̥̃̆\s]/g;
 
+const VISEME_STRENGTH = 0.62;
+
 const PHONEME_MAP = {
   'p': 'PP', 'b': 'PP', 'm': 'PP',
   'f': 'FF', 'v': 'FF',
@@ -96,11 +98,11 @@ export function createVisemeRig(morphMeshes) {
     }
 
     const cur = resolved.get(currentId);
-    if (cur) cur.mesh.morphTargetInfluences[cur.index] = 1 - b * 0.5;
+    if (cur) cur.mesh.morphTargetInfluences[cur.index] = (1 - b * 0.5) * VISEME_STRENGTH;
 
     if (nextId && nextId !== currentId) {
       const nx = resolved.get(nextId);
-      if (nx) nx.mesh.morphTargetInfluences[nx.index] = b * 0.5;
+      if (nx) nx.mesh.morphTargetInfluences[nx.index] = (b * 0.5) * VISEME_STRENGTH;
     }
   }
 

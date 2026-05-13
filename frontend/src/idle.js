@@ -230,11 +230,11 @@ export function createIdle(avatar) {
   }
 
   function update(dt) {
-    if (paused) return;
     t += dt;
+    updateBlink(dt);
+    if (paused) return;
     updateSway();
     updateBreathing();
-    updateBlink(dt);
     updateSaccades(dt);
   }
 
@@ -243,7 +243,6 @@ export function createIdle(avatar) {
     paused = true;
     resetSway();
     resetBreathing();
-    resetBlink();
   }
 
   function resume() {

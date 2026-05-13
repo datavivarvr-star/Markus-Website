@@ -33,6 +33,22 @@ export async function loadAvatar(url, { onProgress } = {}) {
     }
   });
 
+  // Snap bones to frame 0 of the rest/idle animation so the character
+  // starts in its authored pose rather than the geometric T-pose.
+  // 3D viewers do this automatically; we must do it explicitly.
+  if (gltf.animations && gltf.animations.length > 0) {
+    const restClip =
+      gltf.animations.find((c) => /idle|rest|a[\s_-]?pose|stand/i.test(c.name)) ??
+      gltf.animations[0];
+    console.info(`[avatar] snapping to rest pose from clip: "${restClip.name}"`);
+    const mixer = new THREE.AnimationMixer(root);
+    mixer.clipAction(restClip).play();
+    mixer.update(0);
+    // Mixer goes out of scope here; bones retain the applied pose.
+  } else {
+    console.warn('[avatar] no animation clips found — character may appear in T-pose');
+  }
+
   const morphMeshes = findMorphMeshes(root);
   const bones = collectNamedBones(root);
   const hasBlendshapes = morphMeshes.length > 0;
