@@ -6,6 +6,7 @@ import { createVisemeRig } from './visemes.js';
 import { createExpressiveRig } from './expressive.js';
 import { runVisemeDiagnostic } from './viseme-diagnostic.js';
 import { createSpeechController } from './speech.js';
+import { getAudioContext } from './audio.js';
 import {
   createChatClient,
   buildChatUrl,
@@ -219,6 +220,7 @@ async function bootstrap() {
     hideLoader();
     showHud();
     refreshComposer();
+    scheduleIntro(speech, composerState);
 
     const params = new URLSearchParams(window.location.search);
     if (params.get('test') === 'visemes') {
@@ -359,6 +361,38 @@ function installDevControls({ speech }) {
   };
 
   console.info('[dev] dev panel enabled (?dev=1). Click "Test phrase" to test the TTS pipeline.');
+}
+
+function scheduleIntro(speech, composerState) {
+  const INTRO = "Hi, I'm Markus! Feel free to ask me anything — just type or tap the mic.";
+  let played = false;
+
+  function play() {
+    if (played) return;
+    if (composerState.speaking || composerState.llmInFlight) return;
+    played = true;
+    try { speech.warmup(); } catch { /* ignore */ }
+    speech.speakSentence(INTRO);
+  }
+
+  // Small delay so the avatar is fully visible before he speaks.
+  setTimeout(() => {
+    try { speech.warmup(); } catch { /* ignore */ }
+    const ctx = getAudioContext();
+    if (ctx && ctx.state === 'running') {
+      play();
+    } else {
+      // Suspended context (mobile / strict autoplay) — fire on first gesture.
+      const EVENTS = ['pointerdown', 'keydown', 'touchstart'];
+      const onGesture = () => {
+        EVENTS.forEach((e) => document.removeEventListener(e, onGesture, true));
+        setTimeout(play, 80); // brief wait for audio.js to resume the context
+      };
+      EVENTS.forEach((e) =>
+        document.addEventListener(e, onGesture, { capture: true, once: true }),
+      );
+    }
+  }, 400);
 }
 
 function wireAvatarClick({ canvas, stage, avatar, speech, composerState }) {
