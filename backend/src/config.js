@@ -11,7 +11,7 @@ export const config = {
     baseURL: env.GROQ_BASE_URL ?? 'https://api.groq.com/openai/v1',
     model: env.GROQ_MODEL ?? 'openai/gpt-oss-20b',
     temperature: 0.6,
-    maxTokens: 120,
+    maxTokens: 350,
   },
   piperUrl: env.PIPER_URL ?? 'http://piper-tts:8001',
   session: {
